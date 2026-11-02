@@ -18,6 +18,11 @@ export interface Entry {
   allowanceMonth?: string;
   /** Legacy backup field; ignored. Every transaction participates in balances. */
   includedInOpening?: boolean;
+  /**
+   * The initial onboarding receipt is already part of initial.budget. It remains
+   * visible as income and in statistics, but must not be added to the budget again.
+   */
+  includedInInitialBalance?: boolean;
 }
 export interface Ledger {
   format: 'kwallet';
@@ -141,6 +146,28 @@ export function newLedger(
   };
 }
 
+/** Creates the visible receipt used when onboarding says this month's allowance is already in the opening balance. */
+export function initialAllowanceEntry(ledger: Ledger): Entry | undefined {
+  if (!ledger.initial.allowanceReceived || ledger.settings.allowance <= 0) return undefined;
+  const month = monthOf(ledger.initial.date);
+  if (ledger.entries.some((entry) => entry.allowanceMonth === month)) return undefined;
+  const categoryId =
+    ledger.categories.find((category) => category.kind === 'income' && category.name === '生活费')?.id ||
+    ledger.categories.find((category) => category.kind === 'income')?.id;
+  if (!categoryId) return undefined;
+  return {
+    id: `initial-allowance-${ledger.initial.date}`,
+    kind: 'income',
+    cents: ledger.settings.allowance,
+    date: ledger.initial.date,
+    categoryId,
+    note: '首次设置时确认，已包含在起始余额中',
+    createdAt: 0,
+    allowanceMonth: month,
+    includedInInitialBalance: true,
+  };
+}
+
 /** Validate both imported data and every prospective write before committing. */
 export function validateLedger(raw: unknown, today = todayLocal()): asserts raw is Ledger {
   assert(
@@ -189,6 +216,16 @@ export function validateLedger(raw: unknown, today = todayLocal()): asserts raw 
       e.includedInOpening === undefined || typeof e.includedInOpening === 'boolean',
       '历史补记状态无效',
     );
+    if (e.includedInInitialBalance !== undefined) {
+      assert(
+        e.includedInInitialBalance === true &&
+          e.kind === 'income' &&
+          e.date === raw.initial.date &&
+          e.allowanceMonth === monthOf(raw.initial.date) &&
+          raw.initial.allowanceReceived === true,
+        '起始生活费记录无效',
+      );
+    }
     if (String(e.kind).startsWith('transfer'))
       assert(e.date >= raw.initial.date, '资金划转日期不能早于余额基准日');
     assert(Number.isSafeInteger(e.createdAt) && (e.createdAt as number) >= 0, '账单创建时间无效');
@@ -270,7 +307,7 @@ function replay(
       const e = entries[pointer++];
       switch (e.kind) {
         case 'income':
-          budget = add(budget, e.cents);
+          if (!e.includedInInitialBalance) budget = add(budget, e.cents);
           income = add(income, e.cents);
           break;
         case 'expense':
@@ -312,7 +349,7 @@ function replay(
     budget = Math.min(budget, 0);
     month = shiftMonth(month, 1);
   }
-  const todays = entries.filter((e) => e.date === date);
+  const todays = entries.filter((e) => e.date === date && !e.includedInInitialBalance);
   const dayDelta = todays.reduce(
     (sum, e) => add(sum, e.kind === 'expense' || e.kind === 'transfer-out' ? -e.cents : e.cents),
     0,
@@ -326,7 +363,7 @@ export function monthSummary(ledger: Ledger, month: string, through = todayLocal
 }
 export function budgetSummary(ledger: Ledger, date = todayLocal()): BudgetSummary {
   const { summary, dayOpening } = replay(ledger, date);
-  const todays = ledger.entries.filter((e) => e.date === date);
+  const todays = ledger.entries.filter((e) => e.date === date && !e.includedInInitialBalance);
   const dayAdded = todays
     .filter((e) => e.kind !== 'expense')
     .reduce((sum, e) => add(sum, e.kind === 'transfer-out' ? -e.cents : e.cents), 0);

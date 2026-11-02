@@ -63,6 +63,7 @@ import {
   shiftMonth,
   todayLocal,
   firstLedgerDate,
+  initialAllowanceEntry,
   MIN_LEDGER_DATE,
   type Category,
   type Entry,
@@ -203,6 +204,17 @@ export default function App() {
       setBusy(false);
     }
   }
+  useEffect(() => {
+    if (!ledger) return;
+    const receipt = initialAllowanceEntry(ledger);
+    if (!receipt) return;
+    void write((current) => {
+      if (!current) throw new Error('请先创建账本');
+      const pendingReceipt = initialAllowanceEntry(current);
+      if (pendingReceipt) current.entries.push(pendingReceipt);
+      return current;
+    }, ledger.revision).catch((error) => setToast({ text: errorText(error) }));
+  }, [ledger?.revision]);
   async function saveEntry(entry: Entry, expected: number) {
     await write((current) => {
       if (!current) throw new Error('请先创建账本');
@@ -427,10 +439,10 @@ export default function App() {
         {page === 'home' && (
           <>
             <div className="dashboard-grid">
-              <section className="budget-card">
+              <section className={cn('budget-card', summary.dayOver > 0 && 'over-budget')}>
                 <div className="budget-top">
                   <span>
-                    <span className="light-dot" />{' '}
+                    <span className={cn('light-dot', summary.dayOver > 0 && 'danger-dot')} />{' '}
                     {summary.dayOver > 0 ? '今日已超出' : '今日还能花'}
                   </span>
                   <button
@@ -441,8 +453,15 @@ export default function App() {
                     <Info size={19} />
                   </button>
                 </div>
-                <div className="hero-amount">
-                  <span>¥</span>
+                <div
+                  className={cn('hero-amount', summary.dayOver > 0 && 'danger')}
+                  aria-label={
+                    summary.dayOver > 0
+                      ? `今日超出 ${money(summary.dayOver)} 元`
+                      : `今日还能花 ${money(summary.dayRemaining)} 元`
+                  }
+                >
+                  <span>{summary.dayOver > 0 ? '−¥' : '¥'}</span>
                   {money(summary.dayOver || summary.dayRemaining)}
                 </div>
                 <p className="budget-caption">
@@ -794,6 +813,9 @@ function EntryList({
                   : category?.name || kindLabel[entry.kind]}
                 {entry.kind === 'refund' && ' · 退款'}
                 {entry.allowanceMonth && <span className="inline-tag">生活费</span>}
+                {entry.includedInInitialBalance && (
+                  <span className="inline-tag initial-balance-tag">已含起始余额</span>
+                )}
               </strong>
               <small>
                 {dateTitle(entry.date, today)}
@@ -975,6 +997,8 @@ function StatsPage({
   });
   const max = Math.max(...days.map((d) => d.amount), 1);
   const selected = days.find((d) => d.date === selectedDay);
+  const expenseEntriesOn = (date: string) =>
+    entries.filter((entry) => entry.date === date && entry.kind === 'expense');
   return (
     <>
       <div className="toolbar">
@@ -1063,13 +1087,39 @@ function StatsPage({
           </p>
         )}
         <details>
-          <summary>查看每日金额明细</summary>
+          <summary>查看每日消费明细</summary>
           <div className="daily-table">
             {days
               .filter((d) => d.date <= today && d.date >= firstLedgerDate(ledger))
-              .map((d) => (
-                <Detail key={d.date} label={d.date} value={d.amount} />
-              ))}
+              .map((d) => {
+                const dayEntries = expenseEntriesOn(d.date);
+                return (
+                  <div className="daily-summary-row" key={d.date}>
+                    <div className="daily-summary-head">
+                      <span>{d.date}</span>
+                      <strong>¥{money(d.amount)}</strong>
+                    </div>
+                    {dayEntries.length ? (
+                      <div className="daily-entry-details" aria-label={`${d.date} 的消费记录`}>
+                        {dayEntries.map((entry) => {
+                          const category = ledger.categories.find((item) => item.id === entry.categoryId);
+                          return (
+                            <div className="daily-entry-detail" key={entry.id}>
+                              <span>
+                                <b>{category?.name || '未分类'}</b>
+                                <small>{entry.note || '无备注'}</small>
+                              </span>
+                              <strong>−¥{money(entry.cents)}</strong>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <small className="daily-empty">当天没有消费记录</small>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         </details>
       </section>
@@ -1137,13 +1187,19 @@ function Onboarding({
             event.preventDefault();
             setError('');
             try {
+              const date = todayLocal();
               const value = newLedger(
-                todayLocal(),
+                date,
                 parseMoney(budget, true),
                 parseMoney(reserve),
                 parseMoney(allowance),
               );
               value.initial.allowanceReceived = received;
+              if (received) {
+                const receipt = initialAllowanceEntry(value);
+                if (!receipt) throw new Error('已到账的生活费金额需要大于零');
+                value.entries.push(receipt);
+              }
               await onCreate(value);
             } catch (e) {
               setError(errorText(e));
@@ -1154,7 +1210,7 @@ function Onboarding({
             label="每月常用生活费"
             value={allowance}
             onChange={setAllowance}
-            hint="实际到账时再确认，不会自动计入收入。"
+            hint="勾选下方“已到账”后会显示入账记录，不会重复增加余额。"
           />
           <MoneyField
             label="今天开始时，本月生活费还剩多少？"
@@ -1369,6 +1425,31 @@ function EntryModal({
   const refunded = entry
     ? ledger.entries.filter((e) => e.originalId === entry.id).reduce((s, e) => s + e.cents, 0)
     : 0;
+  if (entry?.includedInInitialBalance) {
+    return (
+      <Dialog title="生活费已入账" onClose={() => !busy && onClose()}>
+        <p>
+          这笔 ¥{money(entry.cents)} 生活费在首次设置时已确认到账，并且已经包含在你的起始余额中。
+        </p>
+        <div className="detail-lines">
+          <div>
+            <span>确认日期</span>
+            <strong>{entry.date}</strong>
+          </div>
+          <div>
+            <span>余额处理</span>
+            <strong>已计入起始余额</strong>
+          </div>
+        </div>
+        <p className="explanation">
+          它会显示在账单和收入统计中，但不会再次增加可用钱，避免首次设置时重复计算。
+        </p>
+        <button className="full" onClick={onClose}>
+          知道了
+        </button>
+      </Dialog>
+    );
+  }
   return (
     <Dialog
       title={modal.allowance ? '确认生活费到账' : `${entry ? '编辑' : '记录'}${kindLabel[kind]}`}

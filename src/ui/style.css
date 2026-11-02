@@ -193,6 +193,10 @@ b {
 .light-dot {
   background: #b8dcb3;
 }
+.danger-dot {
+  background: #ffd3cb;
+  box-shadow: 0 0 0 4px #ffd3cb2b;
+}
 .tag {
   background: var(--soft);
   color: var(--muted);
@@ -385,6 +389,25 @@ b {
   position: relative;
   overflow: hidden;
   min-height: 286px;
+}
+.budget-card.over-budget {
+  background: #853833;
+  border: 1px solid #ffb5a8;
+}
+.budget-card.over-budget .glass-button {
+  color: #ffe2dc;
+  border-color: #ffffff42;
+}
+.budget-card.over-budget .hero-amount > span,
+.budget-card.over-budget .budget-caption,
+.budget-card.over-budget .budget-details span {
+  color: #ffe2dc;
+}
+.budget-card.over-budget .budget-divider {
+  background: #ffffff42;
+}
+.budget-card.over-budget .orbit {
+  border-color: #ffd1c51f;
 }
 .budget-card > *:not(.orbit) {
   position: relative;
@@ -723,6 +746,10 @@ b {
   padding: 2px 4px;
   border-radius: 4px;
 }
+.initial-balance-tag {
+  color: var(--muted);
+  background: var(--soft);
+}
 .tomorrow-card {
   padding: 26px;
   border: 1px solid #e2e8d9;
@@ -990,7 +1017,7 @@ b {
   margin: 20px 0;
 }
 .detail-lines > div,
-.daily-table > div {
+.daily-summary-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1000,10 +1027,12 @@ b {
   font-size: 13px;
 }
 .detail-lines span,
-.daily-table span {
+.daily-summary-head span {
   color: var(--muted);
 }
-.detail-lines strong {
+.detail-lines strong,
+.daily-summary-head strong,
+.daily-entry-detail strong {
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -1064,6 +1093,49 @@ summary {
 .daily-table {
   max-height: 260px;
   overflow: auto;
+}
+.daily-summary-row {
+  padding: 13px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.daily-summary-row:last-child {
+  border-bottom: 0;
+}
+.daily-summary-head {
+  padding: 0;
+}
+.daily-entry-details {
+  display: grid;
+  gap: 7px;
+  margin: 9px 0 0 12px;
+  padding: 9px 0 0 12px;
+  border-left: 2px solid var(--green-soft);
+}
+.daily-entry-detail {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.daily-entry-detail > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.daily-entry-detail b {
+  color: var(--text);
+  font-weight: 600;
+}
+.daily-entry-detail small,
+.daily-empty {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.daily-empty {
+  display: block;
+  margin: 8px 0 0;
 }
 .settings-grid {
   display: grid;

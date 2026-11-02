@@ -116,8 +116,10 @@ test('statistics, themes and categories are usable on narrow screens', async ({ 
   await addExpense(page);
   await navigate(page, '统计');
   await expect(page.getByRole('heading', { name: '支出花在哪里' })).toBeVisible();
-  await page.getByText('查看每日金额明细').click();
+  await page.getByText('查看每日消费明细').click();
   await expect(page.locator('.daily-table')).toContainText('45.00');
+  await expect(page.locator('.daily-table')).toContainText('餐饮');
+  await expect(page.locator('.daily-table')).toContainText('测试午餐');
   await navigate(page, '设置');
   await page.getByRole('button', { name: '深色', exact: true }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
@@ -204,8 +206,19 @@ test('initial balance can already contain the current allowance', async ({ page 
   await page.getByRole('button', { name: '开启我的账本' }).click();
   await expect(page.locator('.balance-value')).toHaveText('¥900.00');
   await expect(page.getByRole('button', { name: '确认到账' })).toHaveCount(0);
+  await expect(page.locator('.entry-row')).toContainText('生活费');
+  await expect(page.locator('.entry-row')).toContainText('已含起始余额');
+  await expect(page.locator('.month-metrics')).toContainText('2,000.00');
   await page.setViewportSize({ width: 375, height: 812 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.setViewportSize({ width: 844, height: 390 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('clearly marks a daily overspend with a negative amount', async ({ page }) => {
+  await initialize(page, '60', '0');
+  await addExpense(page, '10');
+  await expect(page.locator('.budget-card')).toHaveClass(/over-budget/);
+  await expect(page.locator('.budget-top')).toContainText('今日已超出');
+  await expect(page.locator('.hero-amount')).toHaveText('−¥6.00');
 });

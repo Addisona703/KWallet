@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   budgetSummary,
   deleteEntry,
+  initialAllowanceEntry,
   isDate,
   monthSummary,
   newLedger,
@@ -57,6 +58,21 @@ describe('integer money and calendar validation', () => {
   });
 });
 describe('monthly rollover and daily allocation', () => {
+  it('shows an initially received allowance without adding it to the opening balance twice', () => {
+    const l = newLedger('2026-11-16', 90000, 0, 200000);
+    l.initial.allowanceReceived = true;
+    const receipt = initialAllowanceEntry(l);
+    expect(receipt).toMatchObject({
+      kind: 'income',
+      cents: 200000,
+      allowanceMonth: '2026-11',
+      includedInInitialBalance: true,
+    });
+    l.entries.push(receipt!);
+    const s = budgetSummary(check(l), '2026-11-16');
+    expect([s.budget, s.income, s.dayOpening, s.dayBudget]).toEqual([90000, 200000, 90000, 6000]);
+    expect(initialAllowanceEntry(l)).toBeUndefined();
+  });
   it('moves positive balances to reserve without increasing next month budget', () => {
     const l = newLedger('2026-11-01', 30000, 0, 200000);
     l.entries.push(entry('income', 200000, '2026-12-01'));
