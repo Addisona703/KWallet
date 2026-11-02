@@ -7,10 +7,10 @@ test.beforeEach(async ({ page }) => {
 });
 async function initialize(page: Page, budget = '900', reserve = '300') {
   await page.goto('./');
-  await page.getByLabel('每月常用生活费', { exact: true }).fill('2000');
-  await page.getByLabel('今天开始时，本月生活费还剩多少？').fill(budget);
-  await page.getByLabel('之前攒下的历史结余').fill(reserve);
-  await page.getByRole('button', { name: '开启我的账本' }).click();
+  const value = newLedger('2026-11-16', Number(budget) * 100, Number(reserve) * 100, 200000);
+  await page.getByLabel('首次使用恢复备份').setInputFiles({
+    name: 'test-ledger.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(value)),
+  });
   await expect(page.getByRole('heading', { name: '每一天，心里都有数。' })).toBeVisible();
 }
 async function addExpense(page: Page, amount = '45') {
@@ -116,9 +116,13 @@ test('statistics, themes and categories are usable on narrow screens', async ({ 
   await addExpense(page);
   await navigate(page, '统计');
   await expect(page.getByRole('heading', { name: '支出花在哪里' })).toBeVisible();
-  await page.getByText('查看每日消费明细').click();
   await expect(page.locator('.daily-table')).toContainText('45.00');
   await expect(page.locator('.daily-table')).toContainText('餐饮');
+  await expect(page.locator('.daily-table')).toContainText('测试午餐');
+  await page.getByRole('button', { name: '2026-11-15 支出 0.00 元' }).click();
+  await expect(page.locator('.daily-table')).toContainText('2026-11-15');
+  await expect(page.locator('.daily-table')).not.toContainText('测试午餐');
+  await page.getByRole('button', { name: '2026-11-16 支出 45.00 元' }).click();
   await expect(page.locator('.daily-table')).toContainText('测试午餐');
   await navigate(page, '设置');
   await page.getByRole('button', { name: '深色', exact: true }).click();
@@ -201,10 +205,13 @@ test('restores an existing backup directly on first use', async ({ page }) => {
 
 test('initial balance can already contain the current allowance', async ({ page }) => {
   await page.goto('./');
-  await page.getByLabel('今天开始时，本月生活费还剩多少？').fill('900');
-  await page.getByLabel('本月生活费已到账，已包含在上面的余额中').check();
+  await page.getByLabel('每月常用生活费', { exact: true }).fill('2000');
+  await page.getByLabel('上月欠款').fill('1100');
+  await page.getByLabel('本月生活费已到账', { exact: true }).check();
   await page.getByRole('button', { name: '开启我的账本' }).click();
   await expect(page.locator('.balance-value')).toHaveText('¥900.00');
+  await expect(page.locator('.hero-amount')).toHaveText('¥60.00');
+  await expect(page.locator('.budget-details')).toContainText('¥60.00');
   await expect(page.getByRole('button', { name: '确认到账' })).toHaveCount(0);
   await expect(page.locator('.entry-row')).toContainText('生活费');
   await expect(page.locator('.entry-row')).toContainText('已含起始余额');
@@ -221,4 +228,18 @@ test('clearly marks a daily overspend with a negative amount', async ({ page }) 
   await expect(page.locator('.budget-card')).toHaveClass(/over-budget/);
   await expect(page.locator('.budget-top')).toContainText('今日已超出');
   await expect(page.locator('.hero-amount')).toHaveText('−¥6.00');
+  await expect(page.locator('.hero-amount')).toHaveCSS('color', 'rgb(255, 255, 255)');
+});
+
+test('keeps previous debt when allowance has not arrived', async ({ page }) => {
+  await page.goto('./');
+  await page.getByLabel('每月常用生活费', { exact: true }).fill('2000');
+  await page.getByLabel('上月欠款').fill('200');
+  await page.getByRole('button', { name: '开启我的账本' }).click();
+  await expect(page.locator('.balance-value')).toHaveText('¥200.00');
+  await expect(page.locator('.hero-amount')).toHaveText('¥0.00');
+  await page.getByRole('button', { name: '确认到账' }).click();
+  await page.getByRole('button', { name: '保存记录' }).click();
+  await expect(page.locator('.balance-value')).toHaveText('¥1,800.00');
+  await expect(page.locator('.hero-amount')).toHaveText('¥120.00');
 });

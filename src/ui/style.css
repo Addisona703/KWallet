@@ -394,6 +394,9 @@ b {
   background: #853833;
   border: 1px solid #ffb5a8;
 }
+.budget-card.over-budget .hero-amount {
+  color: #fff;
+}
 .budget-card.over-budget .glass-button {
   color: #ffe2dc;
   border-color: #ffffff42;
@@ -1067,6 +1070,11 @@ b {
   background: #72a38a;
   border: 0;
   position: relative;
+}
+.column-item > button[aria-pressed='true'] {
+  background: var(--green);
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }
 .column-item > button::after {
   content: '';

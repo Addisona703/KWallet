@@ -30,3 +30,9 @@
 ## 工具说明
 - 项目起始为空，未发现 AGENTS.md。
 - UI 技能的 scripts 为文本路径占位文件，首次按目录执行 search.py 失败；解析后指向的 C:/Users/31833/src/ui-ux-pro-max/scripts/search.py 同样不存在。设计手工应用技能中的触控、字号、语义状态与导航原则。
+
+## 2026-11-02 · 部署核查
+- origin 为 Addisona703/KWallet，main 推送触发 GitHub Pages 工作流。
+- 当前未提交的应用改动包括首次设置欠款、统计选中日期明细、超支金额文字颜色及配套浏览器测试。
+- 沙箱内 gh 报 token 无效，授权联网检查后 keyring 登录有效；不需要重新登录。
+- 模拟账本不含真实个人数据，放入 public/test-data 以便线上下载。

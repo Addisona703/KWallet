@@ -996,7 +996,8 @@ function StatsPage({
     };
   });
   const max = Math.max(...days.map((d) => d.amount), 1);
-  const selected = days.find((d) => d.date === selectedDay);
+  const selected = days.find((d) => d.date === selectedDay) ||
+    days.find((d) => d.date === (month === monthOf(today) ? today : days[days.length - 1].date))!;
   const expenseEntriesOn = (date: string) =>
     entries.filter((entry) => entry.date === date && entry.kind === 'expense');
   return (
@@ -1073,6 +1074,8 @@ function StatsPage({
             <div className="column-item" key={d.date}>
               <button
                 onClick={() => setSelectedDay(d.date)}
+                disabled={d.date > today}
+                aria-pressed={selected.date === d.date}
                 aria-label={`${d.date} 支出 ${money(d.amount)} 元`}
                 title={`${d.date}：¥${money(d.amount)}`}
                 style={{ height: `${Math.max((d.amount / max) * 100, 2)}%` }}
@@ -1081,16 +1084,9 @@ function StatsPage({
             </div>
           ))}
         </div>
-        {selected && (
-          <p className="chart-note" role="status">
-            {selected.date} · 支出 ¥{money(selected.amount)}
-          </p>
-        )}
-        <details>
-          <summary>查看每日消费明细</summary>
+        <div role="status">
           <div className="daily-table">
-            {days
-              .filter((d) => d.date <= today && d.date >= firstLedgerDate(ledger))
+            {[selected]
               .map((d) => {
                 const dayEntries = expenseEntriesOn(d.date);
                 return (
@@ -1121,7 +1117,7 @@ function StatsPage({
                 );
               })}
           </div>
-        </details>
+        </div>
       </section>
     </>
   );
@@ -1137,7 +1133,7 @@ function Onboarding({
   const restoreFile = useRef<HTMLInputElement>(null);
   const [received, setReceived] = useState(false);
   const [allowance, setAllowance] = useState('2000');
-  const [budget, setBudget] = useState('0');
+  const [debt, setDebt] = useState('0');
   const [reserve, setReserve] = useState('0');
   const [error, setError] = useState('');
   return (
@@ -1188,11 +1184,13 @@ function Onboarding({
             setError('');
             try {
               const date = todayLocal();
+              const allowanceCents = parseMoney(allowance);
+              const debtCents = parseMoney(debt);
               const value = newLedger(
                 date,
-                parseMoney(budget, true),
+                (received ? allowanceCents : 0) - debtCents,
                 parseMoney(reserve),
-                parseMoney(allowance),
+                allowanceCents,
               );
               value.initial.allowanceReceived = received;
               if (received) {
@@ -1210,14 +1208,13 @@ function Onboarding({
             label="每月常用生活费"
             value={allowance}
             onChange={setAllowance}
-            hint="勾选下方“已到账”后会显示入账记录，不会重复增加余额。"
+            hint="勾选下方“已到账”后，按这个金额计入本月预算。"
           />
           <MoneyField
-            label="今天开始时，本月生活费还剩多少？"
-            value={budget}
-            onChange={setBudget}
-            signed
-            hint="可填负数表示欠款。今天的消费稍后再记，避免重复扣除。"
+            label="上月欠款"
+            value={debt}
+            onChange={setDebt}
+            hint="没有欠款填 0；欠款会从本月生活费中扣除。"
           />
           <label className="checkbox-field">
             <input
@@ -1225,7 +1222,7 @@ function Onboarding({
               checked={received}
               onChange={(e) => setReceived(e.target.checked)}
             />
-            <span>本月生活费已到账，已包含在上面的余额中</span>
+            <span>本月生活费已到账</span>
           </label>
           <MoneyField
             label="之前攒下的历史结余"

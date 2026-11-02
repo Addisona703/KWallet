@@ -1,0 +1,45 @@
+{
+  "format": "kwallet",
+  "version": 1,
+  "revision": 0,
+  "initial": { "date": "2026-10-01", "budget": 0, "reserve": 30000 },
+  "settings": { "allowance": 150000, "theme": "system" },
+  "categories": [
+    { "id": "expense-0", "name": "餐饮", "kind": "expense", "archived": false },
+    { "id": "expense-1", "name": "交通", "kind": "expense", "archived": false },
+    { "id": "expense-2", "name": "购物", "kind": "expense", "archived": false },
+    { "id": "income-0", "name": "生活费", "kind": "income", "archived": false }
+  ],
+  "entries": [
+    {
+      "id": "demo-oct-allowance", "kind": "income", "cents": 150000,
+      "date": "2026-10-01", "categoryId": "income-0",
+      "note": "测试：10 月生活费到账 1500 元", "createdAt": 1, "allowanceMonth": "2026-10"
+    },
+    {
+      "id": "demo-oct-food", "kind": "expense", "cents": 90000,
+      "date": "2026-10-15", "categoryId": "expense-0",
+      "note": "测试：10 月餐饮合计 900 元", "createdAt": 2
+    },
+    {
+      "id": "demo-oct-shopping", "kind": "expense", "cents": 80000,
+      "date": "2026-10-31", "categoryId": "expense-2",
+      "note": "测试：购物 800 元，10 月总支出 1700 元，月底欠款 200 元", "createdAt": 3
+    },
+    {
+      "id": "demo-nov-allowance", "kind": "income", "cents": 150000,
+      "date": "2026-11-01", "categoryId": "income-0",
+      "note": "测试：11 月生活费到账 1500 元，抵扣上月欠款后可用 1300 元", "createdAt": 4, "allowanceMonth": "2026-11"
+    },
+    {
+      "id": "demo-nov-food", "kind": "expense", "cents": 3000,
+      "date": "2026-11-01", "categoryId": "expense-0",
+      "note": "测试：昨日餐饮 30 元", "createdAt": 5
+    },
+    {
+      "id": "demo-nov-transport", "kind": "expense", "cents": 1000,
+      "date": "2026-11-02", "categoryId": "expense-1",
+      "note": "测试：今日交通 10 元", "createdAt": 6
+    }
+  ]
+}
