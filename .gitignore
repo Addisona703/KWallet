@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.npm-cache/
+.tools/
+test-results/
+playwright-report/
+*.local
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+wallet-backup-*.json

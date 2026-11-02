@@ -1,0 +1,108 @@
+{
+  "format": "kwallet",
+  "version": 1,
+  "revision": 0,
+  "initial": {
+    "date": "2026-11-02",
+    "budget": 0,
+    "reserve": 0
+  },
+  "settings": {
+    "allowance": 150000,
+    "theme": "dark"
+  },
+  "categories": [
+    {
+      "id": "expense-0",
+      "name": "餐饮",
+      "kind": "expense",
+      "archived": false
+    },
+    {
+      "id": "expense-1",
+      "name": "交通",
+      "kind": "expense",
+      "archived": false
+    },
+    {
+      "id": "expense-2",
+      "name": "购物",
+      "kind": "expense",
+      "archived": false
+    },
+    {
+      "id": "expense-3",
+      "name": "娱乐",
+      "kind": "expense",
+      "archived": false
+    },
+    {
+      "id": "expense-4",
+      "name": "学习",
+      "kind": "expense",
+      "archived": false
+    },
+    {
+      "id": "expense-5",
+      "name": "其他",
+      "kind": "expense",
+      "archived": false
+    },
+    {
+      "id": "income-0",
+      "name": "生活费",
+      "kind": "income",
+      "archived": false
+    },
+    {
+      "id": "income-1",
+      "name": "兼职",
+      "kind": "income",
+      "archived": false
+    },
+    {
+      "id": "income-2",
+      "name": "红包",
+      "kind": "income",
+      "archived": false
+    },
+    {
+      "id": "income-3",
+      "name": "其他收入",
+      "kind": "income",
+      "archived": false
+    }
+  ],
+  "entries": [
+    {
+      "id": "debt",
+      "kind": "expense",
+      "cents": 5000,
+      "date": "2026-10-31",
+      "categoryId": "expense-0",
+      "note": "上月欠款测试",
+      "createdAt": 1,
+      "includedInOpening": true
+    },
+    {
+      "id": "income",
+      "kind": "income",
+      "cents": 150000,
+      "date": "2026-11-01",
+      "categoryId": "income-0",
+      "note": "生活费测试",
+      "createdAt": 2,
+      "includedInOpening": true
+    },
+    {
+      "id": "expense",
+      "kind": "expense",
+      "cents": 5500,
+      "date": "2026-11-01",
+      "categoryId": "expense-0",
+      "note": "本月支出测试",
+      "createdAt": 3,
+      "includedInOpening": true
+    }
+  ]
+}

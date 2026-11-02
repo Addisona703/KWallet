@@ -1,0 +1,8 @@
+node_modules
+dist
+.npm-cache
+.tools
+test-results
+playwright-report
+package-lock.json
+public/*.png
