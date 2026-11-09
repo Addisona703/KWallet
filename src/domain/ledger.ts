@@ -6,6 +6,14 @@ export interface Category {
   kind: 'expense' | 'income';
   archived: boolean;
 }
+export interface InstallmentPlan {
+  id: string;
+  categoryId: string;
+  note: string;
+  principal: number;
+  fee: number;
+  periods: { dueDate: string; cents: number; entryId?: string }[];
+}
 export interface Entry {
   id: string;
   kind: EntryKind;
@@ -32,6 +40,7 @@ export interface Ledger {
   settings: { allowance: number; theme: Theme };
   categories: Category[];
   entries: Entry[];
+  installments?: InstallmentPlan[];
 }
 export interface MonthSummary {
   month: string;
@@ -135,6 +144,7 @@ export function newLedger(
         kind: 'expense',
         archived: false,
       })),
+      { id: 'expense-life', name: '生活', kind: 'expense', archived: false },
       ...['生活费', '兼职', '红包', '其他收入'].map((name, i): Category => ({
         id: `income-${i}`,
         name,
@@ -144,6 +154,61 @@ export function newLedger(
     ],
     entries: [],
   };
+}
+
+/** Restore missing default expense categories while preserving existing identities and preferences. */
+export function ensureLifeCategory(ledger: Ledger): boolean {
+  let changed = false;
+  const defaults = ['餐饮', '交通', '购物', '娱乐', '学习', '其他', '生活'];
+  for (const [index, name] of defaults.entries()) {
+    if (ledger.categories.some((c) => c.kind === 'expense' && c.name.trim() === name)) continue;
+    if (ledger.categories.length >= 200) break;
+    const base = index === 6 ? 'expense-life' : `expense-${index}`;
+    let id = base;
+    let suffix = 1;
+    while (ledger.categories.some((c) => c.id === id)) id = `${base}-${suffix++}`;
+    ledger.categories.push({ id, name, kind: 'expense', archived: false });
+    changed = true;
+  }
+  return changed;
+}
+
+export function installmentSchedule(total: number, count: number, firstDate: string) {
+  assert(amount(total) && Number.isInteger(count) && count >= 2 && count <= 120 && total >= count, '请输入有效金额和 2 至 120 期');
+  assert(isDate(firstDate), '首期日期无效');
+  const base = Math.floor(total / count);
+  const day = Number(firstDate.slice(8));
+  return Array.from({ length: count }, (_, i) => {
+    const month = shiftMonth(monthOf(firstDate), i);
+    const dueDate = `${month}-${String(Math.min(day, monthDays(month))).padStart(2, '0')}`;
+    assert(isDate(dueDate), '分期日期超出支持范围');
+    return { dueDate, cents: i === count - 1 ? total - base * (count - 1) : base };
+  });
+}
+
+export function convertToInstallments(ledger: Ledger, entryId: string, plan: InstallmentPlan, firstPaid: boolean) {
+  const entry = ledger.entries.find(e => e.id === entryId);
+  assert(entry?.kind === 'expense', '原支出不存在');
+  assert(!ledger.entries.some(e => e.originalId === entryId), '已有退款的支出暂不支持分期');
+  assert(!(ledger.installments || []).some(p => p.periods.some(period => period.entryId === entryId)), '该支出已经属于分期');
+  assert(entry.cents === plan.principal && entry.categoryId === plan.categoryId && plan.periods.every(p => !p.entryId), '分期信息与原账单不符');
+  if (firstPaid) {
+    entry.cents = plan.periods[0].cents;
+    plan.periods[0].entryId = entry.id;
+  } else {
+    ledger.entries = ledger.entries.filter(e => e.id !== entryId);
+  }
+  (ledger.installments ||= []).push(plan);
+}
+
+export function confirmInstallment(ledger: Ledger, planId: string, index: number, entry: Entry) {
+  const plan = ledger.installments?.find(p => p.id === planId);
+  const period = plan?.periods[index];
+  assert(plan && period && !period.entryId, '该期不存在或已确认');
+  assert(entry.kind === 'expense' && entry.categoryId === plan.categoryId, '分期付款分类无效');
+  assert(!ledger.entries.some(e => e.id === entry.id), '账单标识重复');
+  period.entryId = entry.id;
+  ledger.entries.push(entry);
 }
 
 /** Creates the visible receipt used when onboarding says this month's allowance is already in the opening balance. */
@@ -254,6 +319,31 @@ export function validateLedger(raw: unknown, today = todayLocal()): asserts raw 
   }
   const ledger = raw as unknown as Ledger;
   const entryById = new Map(ledger.entries.map((entry) => [entry.id, entry]));
+  if (ledger.installments !== undefined) {
+    assert(Array.isArray(ledger.installments) && ledger.installments.length <= 10000, '分期计划无效');
+    const planIds = new Set<string>();
+    const paidIds = new Set<string>();
+    for (const plan of ledger.installments) {
+      assert(record(plan) && idValid(plan.id) && !planIds.has(plan.id), '分期标识无效');
+      planIds.add(plan.id);
+      assert(ledger.categories.some(c => c.id === plan.categoryId && c.kind === 'expense'), '分期分类无效');
+      assert(typeof plan.note === 'string' && plan.note.length <= 200, '分期备注无效');
+      assert(amount(plan.principal) && plan.principal > 0 && amount(plan.fee), '分期金额无效');
+      assert(Array.isArray(plan.periods) && plan.periods.length >= 2 && plan.periods.length <= 120, '分期期数无效');
+      let total = 0;
+      for (const period of plan.periods) {
+        assert(record(period) && isDate(period.dueDate) && amount(period.cents) && period.cents > 0, '分期明细无效');
+        total = add(total, period.cents);
+        if (period.entryId !== undefined) {
+          assert(idValid(period.entryId) && !paidIds.has(period.entryId), '分期付款重复');
+          const paid = entryById.get(period.entryId);
+          assert(paid?.kind === 'expense' && paid.categoryId === plan.categoryId, '分期付款记录无效');
+          paidIds.add(period.entryId);
+        }
+      }
+      assert(total === add(plan.principal, plan.fee), '分期金额合计不符');
+    }
+  }
   const refunds = new Map<string, number>();
   for (const e of ledger.entries.filter((x) => x.kind === 'refund')) {
     const original = entryById.get(e.originalId!);
@@ -275,6 +365,7 @@ function replay(
   ledger: Ledger,
   date: string,
   checkTransfers = false,
+  balances?: Map<string, number>,
 ): { summary: MonthSummary; dayOpening: number } {
   assert(isDate(date), '查询日期无效');
   const target = monthOf(date);
@@ -332,6 +423,7 @@ function replay(
           transfers = add(transfers, -e.cents);
           break;
       }
+      balances?.set(e.id, budget);
     }
     result = {
       month,
@@ -356,6 +448,16 @@ function replay(
   );
   dayOpening = add(budget, -dayDelta);
   return { summary: result, dayOpening };
+}
+const balanceCache = new WeakMap<Ledger, Map<string, number>>();
+export function entryBalances(ledger: Ledger): Map<string, number> {
+  const cached = balanceCache.get(ledger);
+  if (cached) return cached;
+  const balances = new Map<string, number>();
+  const lastDate = ledger.entries.reduce((last, e) => e.date > last ? e.date : last, ledger.initial.date);
+  replay(ledger, lastDate, false, balances);
+  balanceCache.set(ledger, balances);
+  return balances;
 }
 export function monthSummary(ledger: Ledger, month: string, through = todayLocal()): MonthSummary {
   const end = `${month}-${String(monthDays(month)).padStart(2, '0')}`;

@@ -1,4 +1,4 @@
-import { type Ledger, validateLedger, todayLocal } from '../domain/ledger';
+import { type Ledger, validateLedger, todayLocal, ensureLifeCategory } from '../domain/ledger';
 
 const DB_NAME = 'kwallet-local';
 const STORE = 'ledger';
@@ -31,9 +31,24 @@ function database() {
 export async function loadLedger(key = 'current'): Promise<Ledger | null> {
   const db = await database();
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readonly');
-    const req = tx.objectStore(STORE).get(key);
-    req.onsuccess = () => resolve(req.result || null);
+    const tx = db.transaction(STORE, key === 'current' ? 'readwrite' : 'readonly');
+    const store = tx.objectStore(STORE);
+    const req = store.get(key);
+    let result: Ledger | null = null;
+    let migrated = false;
+    req.onsuccess = () => {
+      result = req.result || null;
+      if (key === 'current' && result && ensureLifeCategory(result)) {
+        result.revision++;
+        store.put(result, key);
+        migrated = true;
+      }
+    };
+    tx.oncomplete = () => {
+      if (migrated) { notify(); channel?.postMessage('changed'); }
+      resolve(result);
+    };
+    tx.onabort = () => reject(new Error('读取账本失败，请重试'));
     req.onerror = () => reject(new Error('读取账本失败，请重试'));
   });
 }
@@ -56,6 +71,7 @@ export async function mutateLedger(
           throw new Error('账本已在其他页面更新，请关闭表单后重新操作');
         if (preservePrevious && current) store.put(current, 'before-restore');
         output = change(current);
+        ensureLifeCategory(output);
         output.revision = (current?.revision ?? 0) + 1;
         validateLedger(output, todayLocal());
         store.put(output, 'current');

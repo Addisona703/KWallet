@@ -36,6 +36,7 @@ import {
   CircleEllipsis,
   Landmark,
   Coins,
+  House,
 } from 'lucide-react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 import DatePicker from './DatePicker';
@@ -50,6 +51,10 @@ import {
 } from '../data/store';
 import {
   budgetSummary,
+  installmentSchedule,
+  convertToInstallments,
+  confirmInstallment,
+  entryBalances,
   deleteEntry,
   inputMoney,
   kindLabel,
@@ -69,12 +74,16 @@ import {
   type Entry,
   type EntryKind,
   type Ledger,
+  type InstallmentPlan,
   type Theme,
 } from '../domain/ledger';
 
 type Page = 'home' | 'ledger' | 'stats' | 'settings';
 type Modal =
   | { type: 'entry'; kind: EntryKind; entry?: Entry; original?: Entry; allowance?: boolean }
+  | { type: 'installment-setup'; entry: Entry }
+  | { type: 'installment-plan'; planId: string }
+  | { type: 'installment-pay'; planId: string; index: number }
   | { type: 'funds' | 'formula' | 'categories' }
   | { type: 'restore'; value: Ledger }
   | null;
@@ -94,6 +103,7 @@ const categoryIcon = (category?: Category) =>
     购物: ShoppingBag,
     娱乐: Gamepad2,
     学习: BookOpen,
+    生活: House,
     生活费: Landmark,
     兼职: Coins,
   })[category?.name || ''] || CircleEllipsis;
@@ -601,6 +611,12 @@ export default function App() {
           </>
         )}
         {page === 'ledger' && (
+          <>
+          {!!ledger.installments?.length && <section className="panel padded installment-list"><div className="section-heading"><h2>分期计划</h2></div>{ledger.installments.map(plan => {
+            const pending = plan.periods.filter(p => !p.entryId);
+            const overdue = pending.filter(p => p.dueDate < today).length;
+            return <button className="secondary full" key={plan.id} onClick={() => setModal({ type: 'installment-plan', planId: plan.id })}>{plan.note || ledger.categories.find(c => c.id === plan.categoryId)?.name || '分期支出'} · 待还 {pending.length} 期{overdue ? ` · 已逾期 ${overdue} 期` : ''}</button>;
+          })}</section>}
           <LedgerPage
             ledger={ledger}
             today={today}
@@ -610,6 +626,7 @@ export default function App() {
             onEdit={(entry) => setModal({ type: 'entry', kind: entry.kind, entry })}
             undo={undo ? () => void undoDelete() : undefined}
           />
+          </>
         )}
         {page === 'stats' && (
           <StatsPage ledger={ledger} today={today} month={month} picker={monthPicker} />
@@ -675,8 +692,35 @@ export default function App() {
               : undefined
           }
           onRefund={(entry) => setModal({ type: 'entry', kind: 'refund', original: entry })}
+          onInstallment={(entry) => setModal({ type: 'installment-setup', entry })}
         />
       )}
+      {modal?.type === 'installment-setup' && <InstallmentSetup key={modal.entry.id} entry={modal.entry} busy={busy} onClose={() => setModal(null)} onSave={async (plan, firstPaid) => {
+        await write(current => { convertToInstallments(current!, modal.entry.id, plan, firstPaid); return current!; }, ledger.revision);
+        setModal({ type: 'installment-plan', planId: plan.id });
+      }} />}
+      {modal?.type === 'installment-plan' && (() => {
+        const plan = ledger.installments?.find(p => p.id === modal.planId);
+        if (!plan) return null;
+        return <Dialog title="分期计划" onClose={() => setModal(null)}>
+          <p>{plan.note || ledger.categories.find(c => c.id === plan.categoryId)?.name} · 本金 ¥{money(plan.principal)} · 手续费 ¥{money(plan.fee)}</p>
+          <p className="muted">待还 ¥{money(plan.periods.filter(p => !p.entryId).reduce((sum, p) => sum + p.cents, 0))} · 待还计划不会影响余额</p>
+          <p className="muted">已确认的期数可在账单中修改实际金额和日期；暂不支持单独删除或退款。</p>
+          {plan.periods.map((period, index) => {
+            const paid = ledger.entries.find(e => e.id === period.entryId);
+            return <div className="installment-period" key={index}><div><strong>第 {index + 1}/{plan.periods.length} 期 · ¥{money(period.cents)}</strong><small>计划 {period.dueDate} · {paid ? `已扣款 ${paid.date} ¥${money(paid.cents)}` : period.dueDate < today ? '已逾期' : '待还款'}</small></div>{!paid && <button className="secondary" onClick={() => setModal({ type: 'installment-pay', planId: plan.id, index })}>确认扣款</button>}</div>;
+          })}
+        </Dialog>;
+      })()}
+      {modal?.type === 'installment-pay' && (() => {
+        const plan = ledger.installments?.find(p => p.id === modal.planId);
+        if (!plan || !plan.periods[modal.index]) return null;
+        return <InstallmentPayment key={`${plan.id}-${modal.index}`} plan={plan} index={modal.index} today={today} busy={busy} onClose={() => setModal({ type: 'installment-plan', planId: plan.id })} onSave={async (entry) => {
+          await write(current => { confirmInstallment(current!, plan.id, modal.index, entry); return current!; }, ledger.revision);
+          setModal({ type: 'installment-plan', planId: plan.id });
+          setToast({ text: '已确认扣款，余额已更新' });
+        }} />;
+      })()}
       {modal?.type === 'formula' && (
         <Dialog title="今天的预算怎么算？" onClose={() => setModal(null)}>
           <p className="muted">按实际到账的资金分配，不把历史结余自动算进来。</p>
@@ -752,7 +796,10 @@ export default function App() {
 }
 
 function sortEntries(a: Entry, b: Entry) {
-  return b.date.localeCompare(a.date) || b.createdAt - a.createdAt;
+  return b.date.localeCompare(a.date) || b.createdAt - a.createdAt || b.id.localeCompare(a.id);
+}
+function balanceText(value: number) {
+  return `扣款后余额 ${value < 0 ? '−' : ''}¥${money(Math.abs(value))}${value < 0 ? ' · 已超支' : ''}`;
 }
 function Detail({ label, value }: { label: string; value: number }) {
   return (
@@ -797,6 +844,8 @@ function EntryList({
     <div className="entry-list">
       {entries.map((entry) => {
         const category = ledger.categories.find((c) => c.id === entry.categoryId);
+        const plan = ledger.installments?.find(p => p.periods.some(period => period.entryId === entry.id));
+        const installmentNumber = plan ? plan.periods.findIndex(period => period.entryId === entry.id) + 1 : 0;
         const Icon = entry.kind.startsWith('transfer') ? ArrowLeftRight : categoryIcon(category);
         const refunded = ledger.entries
           .filter((e) => e.originalId === entry.id)
@@ -812,6 +861,7 @@ function EntryList({
                   ? kindLabel[entry.kind]
                   : category?.name || kindLabel[entry.kind]}
                 {entry.kind === 'refund' && ' · 退款'}
+                {plan && ` · 第 ${installmentNumber}/${plan.periods.length} 期`}
                 {entry.allowanceMonth && <span className="inline-tag">生活费</span>}
                 {entry.includedInInitialBalance && (
                   <span className="inline-tag initial-balance-tag">已含起始余额</span>
@@ -826,6 +876,7 @@ function EntryList({
             <span className={cn('entry-amount', positive(entry) && 'positive')}>
               {positive(entry) ? '+' : '−'}
               {money(entry.cents)}
+              {entry.kind === 'expense' && <small className={cn('entry-balance', (entryBalances(ledger).get(entry.id) ?? 0) < 0 && 'danger')}>{balanceText(entryBalances(ledger).get(entry.id) ?? 0)}</small>}
             </span>
             <ChevronRight size={15} className="row-chevron" />
           </button>
@@ -999,7 +1050,7 @@ function StatsPage({
   const selected = days.find((d) => d.date === selectedDay) ||
     days.find((d) => d.date === (month === monthOf(today) ? today : days[days.length - 1].date))!;
   const expenseEntriesOn = (date: string) =>
-    entries.filter((entry) => entry.date === date && entry.kind === 'expense');
+    entries.filter((entry) => entry.date === date && entry.kind === 'expense').sort(sortEntries);
   return (
     <>
       <div className="toolbar">
@@ -1105,7 +1156,7 @@ function StatsPage({
                                 <b>{category?.name || '未分类'}</b>
                                 <small>{entry.note || '无备注'}</small>
                               </span>
-                              <strong>−¥{money(entry.cents)}</strong>
+                              <strong>−¥{money(entry.cents)}<small className={cn('entry-balance', (entryBalances(ledger).get(entry.id) ?? 0) < 0 && 'danger')}>{balanceText(entryBalances(ledger).get(entry.id) ?? 0)}</small></strong>
                             </div>
                           );
                         })}
@@ -1357,6 +1408,65 @@ function Dialog({
   );
 }
 
+function InstallmentSetup({ entry, busy, onClose, onSave }: {
+  entry: Entry; busy: boolean; onClose: () => void;
+  onSave: (plan: InstallmentPlan, firstPaid: boolean) => Promise<void>;
+}) {
+  const [count, setCount] = useState('3');
+  const [fee, setFee] = useState('0');
+  const [firstDate, setFirstDate] = useState(entry.date);
+  const [firstPaid, setFirstPaid] = useState(false);
+  const [overrides, setOverrides] = useState<Record<number, string>>({});
+  const [error, setError] = useState('');
+  let schedule: { dueDate: string; cents: number }[] = [];
+  let previewError = '';
+  try {
+    schedule = installmentSchedule(entry.cents + parseMoney(fee), Number(count), firstDate);
+    schedule = schedule.map((period, index) => ({
+      ...period, cents: overrides[index] === undefined ? period.cents : parseMoney(overrides[index]),
+    }));
+    if (schedule.some(p => p.cents <= 0)) throw new Error('每期金额必须大于零');
+    if (schedule.reduce((sum, p) => sum + p.cents, 0) !== entry.cents + parseMoney(fee)) throw new Error('各期金额合计必须等于本金加手续费');
+  } catch (e) { previewError = errorText(e); }
+  return <Dialog title="设置分期" onClose={onClose}>
+    <p>原支出 ¥{money(entry.cents)} 将转换为分期计划。只有确认实际扣款的期数才计入余额。</p>
+    <label className="field"><span>分期期数（2–120）</span><input type="number" min="2" max="120" value={count} onChange={e => { setCount(e.target.value); setOverrides({}); }} /></label>
+    <label className="field"><span>总手续费（元）</span><input inputMode="decimal" value={fee} onChange={e => { setFee(e.target.value); setOverrides({}); }} /></label>
+    <label className="field"><span>首期计划日期</span><input type="date" min="2000-01-01" max="2100-12-31" value={firstDate} onChange={e => setFirstDate(e.target.value)} /></label>
+    <label className="installment-check"><input type="checkbox" checked={firstPaid} onChange={e => setFirstPaid(e.target.checked)} /> 首期已实际扣款，使用原账单日期 {entry.date} 计入首期</label>
+    <p className="explanation">{firstPaid ? '原账单将调整为首期金额，其余各期待确认。' : '原账单将从支出中移除，所有期数待你确认扣款。'}保存后余额和后续预算会重新计算。</p>
+    {schedule.map((period, index) => <label className="installment-period" key={index}><span>第 {index + 1} 期 · {period.dueDate}</span><input aria-label={`第 ${index + 1} 期金额`} inputMode="decimal" value={overrides[index] ?? inputMoney(period.cents)} onChange={e => setOverrides({ ...overrides, [index]: e.target.value })} /></label>)}
+    {(previewError || error) && <p className="form-error" role="alert">{error || previewError}</p>}
+    <button className="full" disabled={busy || !!previewError} onClick={async () => {
+      try {
+        setError('');
+        await onSave({ id: crypto.randomUUID(), categoryId: entry.categoryId!, note: entry.note, principal: entry.cents, fee: parseMoney(fee), periods: schedule }, firstPaid);
+      } catch (e) { setError(errorText(e)); }
+    }}>确认转换为分期</button>
+  </Dialog>;
+}
+
+function InstallmentPayment({ plan, index, today, busy, onClose, onSave }: {
+  plan: InstallmentPlan; index: number; today: string; busy: boolean; onClose: () => void; onSave: (entry: Entry) => Promise<void>;
+}) {
+  const [date, setDate] = useState(today);
+  const [value, setValue] = useState(inputMoney(plan.periods[index].cents));
+  const [error, setError] = useState('');
+  return <Dialog title={`确认第 ${index + 1} 期扣款`} onClose={onClose}>
+    <p>计划扣款 {plan.periods[index].dueDate} · ¥{money(plan.periods[index].cents)}</p>
+    <label className="field"><span>实际扣款日期</span><input type="date" min="2000-01-01" max={today} value={date} onChange={e => setDate(e.target.value)} /></label>
+    <label className="field"><span>实际扣款金额（元）</span><input inputMode="decimal" value={value} onChange={e => setValue(e.target.value)} /></label>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    <button className="full" disabled={busy} onClick={async () => {
+      try {
+        const cents = parseMoney(value);
+        if (cents <= 0 || !date || date > today) throw new Error('请输入有效的实际扣款日期和金额');
+        await onSave({ id: crypto.randomUUID(), kind: 'expense', cents, date, categoryId: plan.categoryId, note: plan.note, createdAt: Date.now() });
+      } catch (e) { setError(errorText(e)); }
+    }}>确认实际扣款</button>
+  </Dialog>;
+}
+
 function EntryModal({
   ledger,
   today,
@@ -1366,6 +1476,7 @@ function EntryModal({
   onSave,
   onDelete,
   onRefund,
+  onInstallment,
 }: {
   ledger: Ledger;
   today: string;
@@ -1375,8 +1486,10 @@ function EntryModal({
   onSave: (e: Entry) => Promise<void>;
   onDelete?: () => Promise<void>;
   onRefund: (e: Entry) => void;
+  onInstallment: (e: Entry) => void;
 }) {
   const { entry, kind, original } = modal;
+  const installment = entry && ledger.installments?.find(p => p.periods.some(period => period.entryId === entry.id));
   const [amount, setAmount] = useState(
     entry ? inputMoney(entry.cents) : modal.allowance ? inputMoney(ledger.settings.allowance) : '',
   );
@@ -1454,6 +1567,8 @@ function EntryModal({
       dirty={dirty}
     >
       <form onSubmit={submit} onChange={() => setDirty(true)}>
+        {installment && <p className="explanation">这是已确认的分期付款，可修改实际金额和日期。分类、删除和退款暂不可修改。</p>}
+        {entry?.kind === 'expense' && <p className="explanation">{balanceText(entryBalances(ledger).get(entry.id) ?? 0)}</p>}
         <MoneyField
           label="金额"
           autoFocus
@@ -1470,6 +1585,7 @@ function EntryModal({
                 <button
                   key={c.id}
                   type="button"
+                  disabled={!!installment && c.id !== entry?.categoryId}
                   className={cn(category === c.id && 'selected')}
                   onClick={() => {
                     setCategory(c.id);
@@ -1532,7 +1648,7 @@ function EntryModal({
       </form>
       {entry && (
         <div className="entry-options">
-          {entry.kind === 'expense' && refunded < entry.cents && (
+          {entry.kind === 'expense' && !installment && refunded < entry.cents && (
             <button
               className="secondary"
               disabled={busy}
@@ -1544,10 +1660,11 @@ function EntryModal({
               记录退款{refunded > 0 && `（已退 ${money(refunded)}）`}
             </button>
           )}
-          <button className="danger-button" disabled={busy} onClick={() => void onDelete?.()}>
+          {entry.kind === 'expense' && !installment && refunded === 0 && <button className="secondary" disabled={busy} onClick={() => { if (!dirty || confirm('放弃尚未保存的修改，设置分期？')) onInstallment(entry); }}>设置分期</button>}
+          {!installment && <button className="danger-button" disabled={busy} onClick={() => void onDelete?.()}>
             <Trash2 size={16} />
             删除记录
-          </button>
+          </button>}
         </div>
       )}
     </Dialog>

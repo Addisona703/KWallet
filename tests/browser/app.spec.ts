@@ -43,6 +43,55 @@ test('mobile records, recalculates, persists and fits the viewport', async ({ pa
   expect(errors).toEqual([]);
 });
 
+test('expense balances and life category survive filtering and reload', async ({ page }) => {
+  await initialize(page);
+  await addExpense(page, '20');
+  await page.getByRole('button', { name: '记一笔支出' }).click();
+  await page.getByLabel('金额', { exact: true }).fill('15');
+  await page.getByRole('button', { name: '生活', exact: true }).click();
+  await page.getByRole('button', { name: '保存记录' }).click();
+  await expect(page.locator('.entry-row').filter({ hasText: '生活' })).toContainText('扣款后余额 ¥865.00');
+  await navigate(page, '账单');
+  await page.getByLabel('筛选分类').selectOption({ label: '生活' });
+  await expect(page.locator('.entry-row')).toHaveCount(1);
+  await expect(page.locator('.entry-row')).toContainText('扣款后余额 ¥865.00');
+  await page.reload();
+  await expect(page.locator('.entry-row').filter({ hasText: '生活' })).toContainText('扣款后余额 ¥865.00');
+});
+
+test('restores missing default categories from the older demo backup', async ({ page }) => {
+  await page.goto('./');
+  await page.getByLabel('首次使用恢复备份').setInputFiles('public/test-data/monthly-debt-demo.json');
+  await page.getByRole('button', { name: '记一笔支出' }).click();
+  for (const name of ['餐饮', '交通', '购物', '娱乐', '学习', '其他', '生活']) {
+    await expect(page.getByRole('dialog').getByRole('button', { name, exact: true })).toBeVisible();
+  }
+});
+
+test('converts an expense to installments and confirms a real payment once', async ({ page }) => {
+  await initialize(page);
+  await addExpense(page, '20');
+  await expect(page.locator('.balance-value')).toHaveText('¥880.00');
+  await page.locator('.entry-row').first().click();
+  await page.getByRole('button', { name: '设置分期' }).click();
+  await expect(page.getByLabel('第 3 期金额')).toHaveValue('6.68');
+  await page.getByRole('button', { name: '确认转换为分期' }).click();
+  await expect(page.getByRole('heading', { name: '分期计划' })).toBeVisible();
+  await page.getByRole('button', { name: '关闭弹窗' }).click();
+  await expect(page.locator('.balance-value')).toHaveText('¥900.00');
+  await navigate(page, '账单');
+  await page.getByRole('button', { name: /测试午餐 · 待还 3 期/ }).click();
+  await page.getByRole('button', { name: '确认扣款' }).first().click();
+  await page.getByLabel('实际扣款金额（元）').fill('7.00');
+  await page.getByRole('button', { name: '确认实际扣款' }).click();
+  await expect(page.getByText('已扣款 2026-11-16 ¥7.00')).toBeVisible();
+  await expect(page.getByRole('button', { name: '确认扣款' })).toHaveCount(2);
+  await page.getByRole('button', { name: '关闭弹窗' }).click();
+  await page.reload();
+  await expect(page.locator('.balance-value')).toHaveText('¥893.00');
+  await expect(page.locator('.entry-row')).toContainText('第 1/3 期');
+});
+
 test('monthly allowance confirmation is not repeated', async ({ page }) => {
   await initialize(page, '-200');
   await page.getByRole('button', { name: '确认到账' }).click();

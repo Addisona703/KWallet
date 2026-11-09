@@ -738,6 +738,21 @@ b {
 .entry-amount.positive {
   color: var(--green);
 }
+.entry-balance {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+  white-space: normal;
+}
+.entry-balance.danger { color: var(--danger); }
+.installment-list { margin-bottom: 20px; }
+.installment-period { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.installment-period > div { min-width: 0; }
+.installment-period small { display: block; color: var(--muted); margin-top: 5px; }
+.installment-period input { width: 100px; min-width: 0; }
+.installment-check { display: flex; align-items: center; gap: 8px; margin: 16px 0; }
 .row-chevron {
   color: var(--muted);
 }

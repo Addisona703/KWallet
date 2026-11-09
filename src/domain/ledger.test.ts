@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   budgetSummary,
+  entryBalances,
+  ensureLifeCategory,
+  installmentSchedule,
+  convertToInstallments,
+  confirmInstallment,
   deleteEntry,
   initialAllowanceEntry,
   isDate,
@@ -58,6 +63,73 @@ describe('integer money and calendar validation', () => {
   });
 });
 describe('monthly rollover and daily allocation', () => {
+  it('splits cents and clamps month end without changing the original billing day', () => {
+    expect(installmentSchedule(10000, 3, '2026-01-31')).toEqual([
+      { dueDate: '2026-01-31', cents: 3333 },
+      { dueDate: '2026-02-28', cents: 3333 },
+      { dueDate: '2026-03-31', cents: 3334 },
+    ]);
+  });
+  it('converts a purchase and only counts manually confirmed payments', () => {
+    const l = newLedger('2026-11-01', 150000, 0, 0);
+    const purchase = entry('expense', 120000, '2026-11-02');
+    l.entries.push(purchase);
+    const plan = { id: 'plan', categoryId: 'expense-0', note: '', principal: 120000, fee: 0, periods: installmentSchedule(120000, 3, '2026-11-02') };
+    convertToInstallments(l, purchase.id, plan, false);
+    expect(budgetSummary(l, '2026-11-02').budget).toBe(150000);
+    const payment = entry('expense', 41000, '2026-11-03');
+    confirmInstallment(l, 'plan', 0, payment);
+    expect(budgetSummary(l, '2026-11-03').budget).toBe(109000);
+    expect(() => confirmInstallment(l, 'plan', 0, entry('expense', 40000, '2026-11-04'))).toThrow('已确认');
+    validateLedger(l, at);
+    expect(parseBackup(JSON.stringify(l), at).installments).toEqual(l.installments);
+  });
+  it('converts a previously paid first installment without charging the purchase twice', () => {
+    const l = newLedger('2026-11-01', 150000, 0, 0);
+    const purchase = entry('expense', 120000, '2026-11-02');
+    l.entries.push(purchase);
+    convertToInstallments(l, purchase.id, { id: 'p', categoryId: 'expense-0', note: '', principal: 120000, fee: 0, periods: installmentSchedule(120000, 3, '2026-11-02') }, true);
+    expect(l.entries).toHaveLength(1);
+    expect(budgetSummary(l, '2026-11-02').budget).toBe(110000);
+    validateLedger(l, at);
+  });
+  it('replays each expense in order with income, refunds and rollover', () => {
+    const l = newLedger('2026-11-01', 10000, 0, 0);
+    const first = entry('expense', 2000, '2026-11-02');
+    const refund = entry('refund', 500, '2026-11-03', { originalId: first.id });
+    const second = entry('expense', 1500, '2026-11-03');
+    const next = entry('expense', 1000, '2026-12-01');
+    l.entries.push(second, next, refund, first);
+    const balances = entryBalances(l);
+    expect(balances.get(first.id)).toBe(8000);
+    expect(balances.get(second.id)).toBe(7000);
+    expect(balances.get(next.id)).toBe(-1000);
+    expect(balances.get(next.id)).toBe(budgetSummary(l, '2026-12-01').budget);
+  });
+  it('adds life without changing existing or archived categories', () => {
+    const l = newLedger('2026-11-01', 0, 0, 0);
+    l.categories = l.categories.filter(c => c.name !== '生活');
+    const ids = l.categories.map(c => c.id);
+    expect(ensureLifeCategory(l)).toBe(true);
+    expect(l.categories.slice(0, ids.length).map(c => c.id)).toEqual(ids);
+    l.categories.find(c => c.name === '生活')!.archived = true;
+    expect(ensureLifeCategory(l)).toBe(false);
+    expect(l.categories.find(c => c.name === '生活')!.archived).toBe(true);
+  });
+  it('restores missing default expense categories without replacing archived or conflicting IDs', () => {
+    const l = newLedger('2026-11-01', 0, 0, 0);
+    l.categories = l.categories.filter(c => !['娱乐', '学习', '其他', '生活'].includes(c.name));
+    l.categories.find(c => c.name === '餐饮')!.archived = true;
+    l.categories.push({ id: 'expense-3', name: '自定义', kind: 'expense', archived: false });
+    expect(ensureLifeCategory(l)).toBe(true);
+    for (const name of ['餐饮', '交通', '购物', '娱乐', '学习', '其他', '生活']) {
+      expect(l.categories.filter(c => c.kind === 'expense' && c.name === name)).toHaveLength(1);
+    }
+    expect(l.categories.find(c => c.name === '餐饮')!.archived).toBe(true);
+    expect(l.categories.find(c => c.name === '自定义')!.id).toBe('expense-3');
+    expect(l.categories.find(c => c.name === '娱乐')!.id).not.toBe('expense-3');
+    expect(ensureLifeCategory(l)).toBe(false);
+  });
   it('shows an initially received allowance without adding it to the opening balance twice', () => {
     const l = newLedger('2026-11-16', 90000, 0, 200000);
     l.initial.allowanceReceived = true;

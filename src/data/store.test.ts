@@ -16,6 +16,27 @@ const income = (id: string): Entry => ({
   note: '',
 });
 describe('IndexedDB atomic writes', () => {
+  it('migrates an existing ledger when loading it without changing entries', async () => {
+    const legacy = newLedger('2026-01-01', 10000, 0, 0);
+    legacy.categories = legacy.categories.filter(c => c.name !== '生活');
+    legacy.entries.push(income('old'));
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('kwallet-local', 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction('ledger', 'readwrite');
+      tx.objectStore('ledger').put(legacy, 'current');
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error);
+    });
+    db.close();
+    const loaded = (await loadLedger())!;
+    expect(loaded.categories.filter(c => c.name === '生活')).toHaveLength(1);
+    expect(loaded.entries).toEqual(legacy.entries);
+    expect((await loadLedger())!.revision).toBe(loaded.revision);
+  });
   it('serializes concurrent writes without losing either entry', async () => {
     await Promise.all(
       ['a', 'b'].map((id) =>
